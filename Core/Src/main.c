@@ -125,9 +125,12 @@ void __tim1_interrupt_callback() {
 }
 
 float VEL1 = 2.0F, VEL2 = 6.0F;
+int DUTY1 = 1, DUTY2 = 2;
+int TIME1 = 2000, TIME2 = 2000;
+
 float TARV = 10.0F;
 int TDUTY = 0; float DUTYF = 0.2F;
-int TIME1 = 2000, TIME2 = 2000;
+
 
 float acc = 0.01F, vel = 0;
 int time = 0;
@@ -137,7 +140,7 @@ void __tim2_interrupt_callback() {
 	if (time > 0) {
 		time -= 1;
 		if (time - TIME2 > 0) {
-			DUTY = 0.01;
+			DUTY = DUTY1 / 100.0F;
 			SET_FREQ(vel * 3);
 			if (vel < VEL1)
 				vel = (vel < VEL1) ? (vel + acc) : VEL1;
@@ -145,7 +148,7 @@ void __tim2_interrupt_callback() {
 				acc = 0.01F;
 			acc = (acc < 0.2F) ? (acc + 0.001F) : 0.2F;
 		} else {
-			DUTY = 0.02;
+			DUTY = DUTY2 / 100.0F;
 			SET_FREQ(vel * 3);
 			if (vel < VEL2)
 				vel = (vel < VEL2) ? (vel + acc) : VEL2;
@@ -202,6 +205,41 @@ void __start_motor() {
 }
 
 void __stop_motor() {
+	float tmpV = TARV; int tmpD = TDUTY;
+
+	TARV = VEL2 + VEL1 * 2; TDUTY = DUTY2 + DUTY1 * 2;
+	acc = 0.01F;
+	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F));
+
+	TARV = VEL2; TDUTY = DUTY2;
+	acc = 0.01F;
+	long start = HAL_GetTick();
+	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F));
+	while (HAL_GetTick() - start < TIME2);
+
+	TARV = VEL1; TDUTY = DUTY1;
+	acc = 0.01F;
+	start = HAL_GetTick();
+	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F));
+	while (HAL_GetTick() - start < TIME1);
+
+	TARV = 0; TDUTY = 0;
+	acc = 0.01F;
+	while (vel > 0.1F || DUTY > 0.001F);
+
+	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
+	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
+	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_3);
+	HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_1);
+	HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_2);
+	HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_3);
+	HAL_TIM_Base_Stop_IT(&htim1);
+	HAL_TIM_Base_Stop_IT(&htim2);
+
+	TARV = tmpV; TDUTY = tmpD;
+}
+
+void __halt_motor() {
 	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
 	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_3);
@@ -232,6 +270,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 			state = 1;
 			printf("[INFO]  Motor started.\r\n");
 		} else {
+			printf("[INFO]  Stopping motor...\r\n");
 			__stop_motor();
 			state = 0;
 			printf("[INFO]  Motor stopped.\r\n");
@@ -333,9 +372,9 @@ int main(void)
 	  case 'R':
 	  case 'r':
 		  dir = 1 - dir;
-		  __stop_motor();
+		  __halt_motor();
 		  state = 0;
-		  printf("[INFO]  Direction: %s, motor stopped.\r\n", dir == 1 ? "forward" : "reverse");
+		  printf("[INFO]  Direction: %s, motor halted.\r\n", dir == 1 ? "forward" : "reverse");
 		  break;
 	  default:
 		  break;
