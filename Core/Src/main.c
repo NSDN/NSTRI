@@ -42,6 +42,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+IWDG_HandleTypeDef hiwdg;
+
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 
@@ -60,6 +62,7 @@ static void MX_DMA_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_IWDG_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -129,7 +132,7 @@ int DUTY1 = 1, DUTY2 = 2;
 int TIME1 = 2000, TIME2 = 2000;
 
 float TARV = 10.0F;
-int TDUTY = 0; float DUTYF = 0.2F;
+int TDUTY = 0; float DUTYF = 0.1F;
 
 
 float acc = 0.01F, vel = 0;
@@ -209,19 +212,20 @@ void __stop_motor() {
 
 	TARV = VEL2 + VEL1 * 2; TDUTY = DUTY2 + DUTY1 * 2;
 	acc = 0.01F;
-	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F));
+	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F))
+		HAL_IWDG_Refresh(&hiwdg);
 
 	TARV = VEL2; TDUTY = DUTY2;
 	acc = 0.01F;
 	long start = HAL_GetTick();
 	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F));
-	while (HAL_GetTick() - start < TIME2);
+	while (HAL_GetTick() - start < TIME2) HAL_IWDG_Refresh(&hiwdg);
 
 	TARV = VEL1; TDUTY = DUTY1;
 	acc = 0.01F;
 	start = HAL_GetTick();
 	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F));
-	while (HAL_GetTick() - start < TIME1);
+	while (HAL_GetTick() - start < TIME1) HAL_IWDG_Refresh(&hiwdg);
 
 	TARV = 0; TDUTY = 0;
 	acc = 0.01F;
@@ -281,6 +285,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 		TARV += TARV < 50 ? (TARV < 10 ? 2 : 10) : 50;
 		TARV = TARV > 3000 ? 3000 : TARV;
 		printf("[CONF]  Target: %d\r\n", (int) TARV);
+		if (TARV > 250)
+			printf("[WARN]  Target larger than 250 may cause IWDG reset !\r\n");
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 		break;
 	case GPIO_PIN_5:	// CKD
@@ -328,9 +334,11 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
+  MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
   TIM1->ARR = 999; // 100Hz
   DUTY = 0.0F;
+  HAL_IWDG_Refresh(&hiwdg);
 
   printf("NSTRI - BLDC Motor Controller | by drzzm32\r\n");
   /* USER CODE END 2 */
@@ -339,7 +347,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1) {
 	  char ch = 0;
-	  while (HAL_UART_Receive_DMA(&huart1, (uint8_t *)&ch, 1) != HAL_OK);
+	  while (HAL_UART_Receive_DMA(&huart1, (uint8_t *)&ch, 1) != HAL_OK)
+		  HAL_IWDG_Refresh(&hiwdg);
 
 	  uint16_t pin = 0xFFFF;
 	  switch (ch) {
@@ -402,10 +411,11 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
@@ -439,6 +449,35 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief IWDG Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_IWDG_Init(void)
+{
+
+  /* USER CODE BEGIN IWDG_Init 0 */
+
+  /* USER CODE END IWDG_Init 0 */
+
+  /* USER CODE BEGIN IWDG_Init 1 */
+
+  /* USER CODE END IWDG_Init 1 */
+  hiwdg.Instance = IWDG;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_8;
+  hiwdg.Init.Window = 4095;
+  hiwdg.Init.Reload = 4095;
+  if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN IWDG_Init 2 */
+
+  /* USER CODE END IWDG_Init 2 */
+
+}
+
+/**
   * @brief TIM1 Initialization Function
   * @param None
   * @retval None
@@ -459,7 +498,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 5;
+  htim1.Init.Prescaler = 9;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 999;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
