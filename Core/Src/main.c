@@ -70,7 +70,8 @@ static void MX_IWDG_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 int __io_putchar(int ch) {
-	while (HAL_UART_Transmit_DMA(&huart1, (uint8_t *) &ch, 1) != HAL_OK);
+	while (HAL_UART_Transmit_DMA(&huart1, (uint8_t *) &ch, 1) != HAL_OK)
+		HAL_IWDG_Refresh(&hiwdg);
 	return ch;
 }
 
@@ -138,6 +139,7 @@ int TDUTY = 0; float DUTYF = 0.1F;
 float acc = 0.01F, vel = 0;
 int time = 0;
 uint8_t state = 0;
+volatile uint32_t counter = 0;
 
 void __tim2_interrupt_callback() {
 	if (time > 0) {
@@ -191,6 +193,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 	}
 }
 
+void __update_disp() {
+	HAL_IWDG_Refresh(&hiwdg);
+
+	printf("x0.val=%d\xff\xff\xff", (int) (vel * 100.0f));
+    printf("x1.val=%d\xff\xff\xff", (int) (DUTY * 100.0f));
+}
+
 void __start_motor() {
 	time = TIME1 + TIME2;
 	vel = MIN_VEL;
@@ -213,23 +222,25 @@ void __stop_motor() {
 	TARV = VEL2 + VEL1 * 2; TDUTY = DUTY2 + DUTY1 * 2;
 	acc = 0.01F;
 	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F))
-		HAL_IWDG_Refresh(&hiwdg);
+		__update_disp();
 
 	TARV = VEL2; TDUTY = DUTY2;
 	acc = 0.01F;
 	long start = HAL_GetTick();
-	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F));
-	while (HAL_GetTick() - start < TIME2) HAL_IWDG_Refresh(&hiwdg);
+	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F))
+		__update_disp();
+	while (HAL_GetTick() - start < TIME2) __update_disp();
 
 	TARV = VEL1; TDUTY = DUTY1;
 	acc = 0.01F;
 	start = HAL_GetTick();
-	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F));
-	while (HAL_GetTick() - start < TIME1) HAL_IWDG_Refresh(&hiwdg);
+	while (vel > TARV + 0.1F || DUTY > (float) (TDUTY / 100.0F + 0.001F))
+		__update_disp();
+	while (HAL_GetTick() - start < TIME1) __update_disp();
 
 	TARV = 0; TDUTY = 0;
 	acc = 0.01F;
-	while (vel > 0.1F || DUTY > 0.001F);
+	while (vel > 0.1F || DUTY > 0.001F) __update_disp();
 
 	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
@@ -258,41 +269,41 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	switch (GPIO_Pin) {
 	case GPIO_PIN_11:	// KEY1
 		TDUTY += TDUTY < 5 ? 1 : 5;
-		TDUTY = TDUTY > 100 ? 1 : TDUTY;
-		printf("[CONF]  Duty: %d\r\n", TDUTY);
+		TDUTY = TDUTY > 100 ? 100 : TDUTY;
+		//printf("[CONF]  Duty: %d\r\n", TDUTY);
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 		break;
 	case GPIO_PIN_12:	// KEY2
 		TDUTY -= TDUTY <= 5 ? 1 : 5;
 		TDUTY = TDUTY < 0 ? 0 : TDUTY;
-		printf("[CONF]  Duty: %d\r\n", TDUTY);
+		//printf("[CONF]  Duty: %d\r\n", TDUTY);
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 		break;
 	case GPIO_PIN_3:	// CKP
 		if (state == 0) {
 			__start_motor();
 			state = 1;
-			printf("[INFO]  Motor started.\r\n");
+			//printf("[INFO]  Motor started.\r\n");
 		} else {
-			printf("[INFO]  Stopping motor...\r\n");
+			//printf("[INFO]  Stopping motor...\r\n");
 			__stop_motor();
 			state = 0;
-			printf("[INFO]  Motor stopped.\r\n");
+			//printf("[INFO]  Motor stopped.\r\n");
 		}
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 		break;
 	case GPIO_PIN_4:	// CKU
 		TARV += TARV < 50 ? (TARV < 10 ? 2 : 10) : 50;
 		TARV = TARV > 3000 ? 3000 : TARV;
-		printf("[CONF]  Target: %d\r\n", (int) TARV);
-		if (TARV > 250)
-			printf("[WARN]  Target larger than 250 may cause IWDG reset !\r\n");
+//		printf("[CONF]  Target: %d\r\n", (int) TARV);
+//		if (TARV > 250)
+//			printf("[WARN]  Target larger than 250 may cause IWDG reset !\r\n");
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 		break;
 	case GPIO_PIN_5:	// CKD
 		TARV -= TARV <= 50 ? (TARV <= 10 ? 2 : 10) : 50;
 		TARV = TARV < MIN_VEL ? MIN_VEL : TARV;
-		printf("[CONF]  Target: %d\r\n", (int) TARV);
+		//printf("[CONF]  Target: %d\r\n", (int) TARV);
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 		break;
 	default:
@@ -340,18 +351,31 @@ int main(void)
   DUTY = 0.0F;
   HAL_IWDG_Refresh(&hiwdg);
 
-  printf("NSTRI - BLDC Motor Controller | by drzzm32\r\n");
+  //printf("NSTRI - BLDC Motor Controller | by drzzm32\r\n");
+
+  if (HAL_GPIO_ReadPin(CTL_MODE_GPIO_Port, CTL_MODE_Pin) == GPIO_PIN_RESET) {
+	  DUTYF = 0.2F;
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
 	  char ch = 0;
-	  while (HAL_UART_Receive_DMA(&huart1, (uint8_t *)&ch, 1) != HAL_OK)
+	  while (HAL_UART_Receive_DMA(&huart1, (uint8_t *)&ch, 1) != HAL_OK) {
 		  HAL_IWDG_Refresh(&hiwdg);
+		  printf("x2.val=%d\xff\xff\xff", (int) (TARV * 100));
+		  printf("x3.val=%d\xff\xff\xff", TDUTY);
+	  }
 
 	  uint16_t pin = 0xFFFF;
 	  switch (ch) {
+	  case 0xAA:
+		  __start_motor();
+		  break;
+	  case 0xA5:
+		  __stop_motor();
+		  break;
 	  case ' ':
 		  pin = GPIO_PIN_3;
 		  break;
@@ -373,17 +397,22 @@ int main(void)
 		  break;
 	  case 'Q':
 	  case 'q':
-		  printf("[INFO]  Target: (%d, %d%%), current: (%d, %d.%d%%)\r\n",
-			  (int) TARV, TDUTY,
-			  (int) vel, (int) (DUTY * 100), (int) ((DUTY * 100 - (int) (DUTY * 100)) * 1000)
-		  );
+//		  printf("[INFO]  Target: (%d, %d%%), current: (%d, %d.%d%%)\r\n",
+//			  (int) TARV, TDUTY,
+//			  (int) vel, (int) (DUTY * 100), (int) ((DUTY * 100 - (int) (DUTY * 100)) * 1000)
+//		  );
+		  printf("x0.val=%d\xff\xff\xff", (int) (vel * 100.0f));
+		  printf("x1.val=%d\xff\xff\xff", (int) (DUTY * 100.0f));
 		  break;
 	  case 'R':
 	  case 'r':
-		  dir = 1 - dir;
 		  __halt_motor();
+		  dir = 1 - dir;
 		  state = 0;
-		  printf("[INFO]  Direction: %s, motor halted.\r\n", dir == 1 ? "forward" : "reverse");
+//		  printf("[INFO]  Direction: %s, motor halted.\r\n", dir == 1 ? "forward" : "reverse");
+		  printf("x0.val=%d\xff\xff\xff", 0);
+		  printf("x1.val=%d\xff\xff\xff", 0);
+		  printf("h0.val=%d\xff\xff\xff", dir);
 		  break;
 	  default:
 		  break;
@@ -681,8 +710,14 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : ADC_U_Pin ADC_V_Pin ADC_W_Pin ADC_PWR_Pin */
-  GPIO_InitStruct.Pin = ADC_U_Pin|ADC_V_Pin|ADC_W_Pin|ADC_PWR_Pin;
+  /*Configure GPIO pin : CTL_MODE_Pin */
+  GPIO_InitStruct.Pin = CTL_MODE_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(CTL_MODE_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : ADC_V_Pin ADC_W_Pin ADC_PWR_Pin */
+  GPIO_InitStruct.Pin = ADC_V_Pin|ADC_W_Pin|ADC_PWR_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
